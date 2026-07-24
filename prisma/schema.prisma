@@ -1,0 +1,192 @@
+// Esquema de datos del motor financiero de Nexo Inmobiliario.
+// Basado en la sección 4 de especificacion_app_nexo_inmobiliario.md, ajustado con los
+// hallazgos documentados en MOTOR_FINANCIERO.md (sección 9: discrepancias frente al Excel real).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Parámetros regulatorios y fiscales de Guatemala (sección 5 de la especificación).
+/// Tabla singleton: una sola fila viva a la vez, editable desde configuración.
+model ConfiguracionGlobal {
+  id                           String   @id @default(cuid())
+  iva                          Float    @default(0.12)
+  pctCostosConCreditoFiscalIVA Float    @default(0.85)
+  isr                          Float    @default(0.25)
+  /// Factor de base gravable aplicado al ISR final (MOTOR_FINANCIERO.md §7.6: la hoja FCF
+  /// aplica ISR = utilidadAcumulada * 0.25 * 0.8; el 0.8 no está documentado en el Excel y
+  /// debe poder ajustarse o ponerse en 1 sin tocar código).
+  factorBaseGravableISR        Float    @default(0.8)
+  timbres                      Float    @default(0.03)
+  /// % de una venta que se grava con IVA vs. con timbres (MOTOR_FINANCIERO.md §5: 70/30).
+  pctVentaConIVA               Float    @default(0.7)
+  pctVentaConTimbres           Float    @default(0.3)
+  tasaDescuentoVANAnual        Float    @default(0.10)
+  /// Constante de conversión m2 → varas2 (MOTOR_FINANCIERO.md §9.7: el Excel usa dos valores
+  /// ligeramente distintos; se fija una sola constante configurable).
+  factorM2AVaras2              Float    @default(1.423)
+  actualizadoEn                DateTime @updatedAt
+}
+
+/// Parámetros de zonificación POT por zona general (hoja `POT` del Excel).
+model ZonificacionPOT {
+  id                         String     @id @default(cuid())
+  /// "G0".."G5"
+  zona                       String     @unique
+  nombre                     String
+  indiceEdificBaseMin        Float
+  indiceEdificBaseMax        Float
+  /// Nulo para G0: esa zona no tiene rango "ampliado" en el Excel (MOTOR_FINANCIERO.md §1).
+  indiceEdificAmplMin        Float?
+  indiceEdificAmplMax        Float?
+  alturaBaseMin              Float
+  alturaBaseMax              Float
+  alturaAmplMin              Float?
+  alturaAmplMax              Float?
+  /// % Residencial para uso "Mixto" (columna `% Residencial` de la hoja POT). Nulo si la zona
+  /// no define uso mixto (caso G0).
+  porcentajeResidencialMixto Float?
+  proyectos                  Proyecto[]
+}
+
+enum EstadoProyecto {
+  EN_ANALISIS
+  APROBADO
+  EN_CONSTRUCCION
+  ARCHIVADO
+}
+
+model Proyecto {
+  id              String          @id @default(cuid())
+  nombre          String
+  ubicacion       String?
+  zonaId          String
+  zona            ZonificacionPOT @relation(fields: [zonaId], references: [id])
+  fechaCreacion   DateTime        @default(now())
+  /// Mes 0 del flujo de caja (ancla para las fechas de XIRR, MOTOR_FINANCIERO.md §7.7).
+  fechaInicio     DateTime
+  duracionMeses   Int             @default(48)
+  estado          EstadoProyecto  @default(EN_ANALISIS)
+  tipoCambioQxUSD Float           @default(7.8)
+
+  terreno        Terreno?
+  costos         Costo[]
+  ventas         Venta[]
+  financiamiento Financiamiento?
+  resultados     Resultado[]
+}
+
+model Terreno {
+  id               String   @id @default(cuid())
+  proyectoId       String   @unique
+  proyecto         Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  areaM2           Float
+  /// Costo por vara2 en USD (MOTOR_FINANCIERO.md §3: 'Modelo de Desarrollo "Q"'!B34).
+  /// costoTotalQ = costoUSDPorVara2 * (areaM2 * factorM2AVaras2) * tipoCambioQxUSD
+  costoUSDPorVara2 Float
+  // El área construible máxima se CALCULA, no se guarda (ver motor de edificabilidad).
+}
+
+enum GrupoCosto {
+  COSTO_DIRECTO
+  GASTO_INDIRECTO
+  DEVELOPER_FEE
+}
+
+model Costo {
+  id                  String     @id @default(cuid())
+  proyectoId          String
+  proyecto            Proyecto   @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  /// "Prefactibilidad", "Diseño", "Licencias y Permisos", "Urbanización", "Construcción
+  /// Parqueo", "Construcción Edificio", "Áreas y Servicios Comunes", "Instalaciones y Equipo
+  /// Soporte", "PM", "Mercadeo", "Costos Legales", "IUSI", "Avalúos", etc.
+  categoria           String
+  grupo               GrupoCosto @default(COSTO_DIRECTO)
+  costoPorM2          Float?
+  areaM2              Float?
+  /// Monto total de la categoría. Si costoPorM2/areaM2 están presentes, montoTotal = su
+  /// producto; si no (p. ej. Developer Fee, PM), es un monto directo.
+  montoTotal          Float
+  /// Modo simple: desembolso lineal entre mesInicio y mesInicio+mesesDuracion-1.
+  mesInicio           Int?
+  mesesDuracion       Int?
+  /// Modo avanzado: curva de desembolso explícita [{ mes: number, monto: number }], suma debe
+  /// igualar montoTotal. Tiene prioridad sobre mesInicio/mesesDuracion cuando está presente
+  /// (MOTOR_FINANCIERO.md §7.3 y §9.5: en el Excel real cada categoría tiene su propia curva
+  /// manual, no una distribución lineal).
+  curvaDesembolsoJson Json?
+}
+
+model Venta {
+  id                         String   @id @default(cuid())
+  proyectoId                 String
+  proyecto                   Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  /// "Residencial","Comercial","Parqueos Comerciales","Oficinas","Parqueos Oficinas",
+  /// "Industrial","Parqueos Industrial","Autoservicios","Parqueo Autoservicio".
+  tipoUnidad                 String
+  /// "m2" o "unidad" (MOTOR_FINANCIERO.md §5).
+  unidad                     String   @default("m2")
+  cantidad                   Float
+  /// Precio de lista SIN impuestos, por m2 o por unidad según `unidad`.
+  precioVentaSinImpuestosUSD Float
+  /// Velocidad de absorción: unidades/m2 vendidas por mes.
+  unidadesPorMes             Float
+  mesInicioVentas            Int
+  /// % de enganche sobre el precio sin impuestos (MOTOR_FINANCIERO.md §6).
+  pctEnganche                Float    @default(0.2)
+  montoReservaQ              Float    @default(20000)
+  mesesEnganche              Int      @default(30)
+  /// Mes en que inicia el pago del saldo (80%) al momento de la escrituración/entrega. Si es
+  /// nulo, se asume mesInicioVentas + mesesEnganche (MOTOR_FINANCIERO.md §7.2: el saldo se
+  /// reconoce junto con IVA/timbres en el momento de la escrituración, no del enganche).
+  mesInicioEscrituracion     Int?
+  /// Número de cuotas iguales en que se cobra el saldo (80%) al escriturar. En el Excel real
+  /// son 4 (MOTOR_FINANCIERO.md §7.2).
+  mesesEscrituracion         Int      @default(4)
+}
+
+model Financiamiento {
+  id                         String   @id @default(cuid())
+  proyectoId                 String   @unique
+  proyecto                   Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  tasaAnual                  Float    @default(0.0775)
+  /// Referencia de cumplimiento, no genera el desembolso automáticamente (MOTOR_FINANCIERO.md
+  /// §7.5: el crédito real es un monto techo fijo con curva de disposición/repago manual).
+  ltv                        Float    @default(0.70)
+  /// Monto techo del crédito bancario (ej. Q55,000,000).
+  montoTechoCredito          Float
+  /// Curva de disposición mensual del crédito: [{ mes: number, monto: number }], suma debe
+  /// igualar montoTechoCredito.
+  curvaDisposicionJson       Json
+  /// Curva de repago de principal: [{ mes: number, monto: number }], suma debe igualar
+  /// montoTechoCredito.
+  curvaRepagoJson            Json
+  /// Aporte objetivo total de socios (incluye el terreno), ej. Q20,000,000
+  /// (MOTOR_FINANCIERO.md §7.6: capitalSocios = capitalObjetivo - costoTerreno).
+  capitalTotalSociosObjetivo Float
+}
+
+model Resultado {
+  id                       String   @id @default(cuid())
+  proyectoId               String
+  proyecto                 Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  escenario                String   @default("base") // "base","optimista","pesimista"
+  fechaCalculo             DateTime @default(now())
+  van                      Float
+  tir                      Float
+  roi                      Float
+  maxCapitalRequerido      Float
+  isrTotal                 Float
+  utilidadDespuesImpuestos Float
+  /// Array mensual: { mes, fecha, ingresos, costos, gastos, ivaCostos, flujoOperativo,
+  /// desembolsoCredito, intereses, pagoPrincipal, flujoConFinanciamiento, isr, flujoNeto,
+  /// flujoNetoAcumulado } — ver MOTOR_FINANCIERO.md §7 para la fórmula de cada campo.
+  flujoCajaMensualJson     Json
+
+  @@index([proyectoId, escenario])
+}
