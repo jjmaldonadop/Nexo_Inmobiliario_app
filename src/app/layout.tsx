@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./globals.css";
 
 export const metadata = {
   title: "Nexo Inmobiliario — Factibilidad Financiera",
@@ -8,7 +9,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body className="min-h-screen bg-slate-50 text-slate-900">{children}</body>
     </html>
   );
 }
