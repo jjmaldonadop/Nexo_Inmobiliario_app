@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { COLOR_NEGATIVO } from "@/lib/colores-grafica";
 import { formatoPct, formatoQ } from "@/lib/formato";
@@ -52,12 +53,14 @@ function CabeceraOrdenable({
 }
 
 /** Dashboard de proyectos (sección 8.1 de la especificación): ordenable por columna, filtrable
- * por estado y por texto. */
+ * por estado y por texto, con selección múltiple para el panel comparativo (sección 8.4). */
 export function TablaProyectos({ proyectos }: { proyectos: ProyectoFila[] }) {
+  const router = useRouter();
   const [busqueda, setBusqueda] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState<string>("TODOS");
   const [ordenPor, setOrdenPor] = useState<Columna>("nombre");
   const [direccion, setDireccion] = useState<"asc" | "desc">("asc");
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
 
   function cambiarOrden(columna: Columna) {
     if (columna === ordenPor) {
@@ -66,6 +69,22 @@ export function TablaProyectos({ proyectos }: { proyectos: ProyectoFila[] }) {
       setOrdenPor(columna);
       setDireccion("asc");
     }
+  }
+
+  function alternarSeleccion(id: string) {
+    setSeleccionados((actual) => {
+      const nuevo = new Set(actual);
+      if (nuevo.has(id)) {
+        nuevo.delete(id);
+      } else {
+        nuevo.add(id);
+      }
+      return nuevo;
+    });
+  }
+
+  function irAComparar() {
+    router.push(`/comparar?ids=${Array.from(seleccionados).join(",")}`);
   }
 
   const filas = useMemo(() => {
@@ -109,12 +128,26 @@ export function TablaProyectos({ proyectos }: { proyectos: ProyectoFila[] }) {
         <span className="text-sm text-slate-400">
           {filas.length} de {proyectos.length} proyectos
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          {seleccionados.size > 0 && (
+            <span className="text-sm text-slate-500">{seleccionados.size} seleccionados</span>
+          )}
+          <button
+            type="button"
+            disabled={seleccionados.size < 2}
+            onClick={irAComparar}
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Comparar seleccionados
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="w-full text-sm">
           <thead className="bg-slate-100">
             <tr>
+              <th className="w-8 px-3 py-2" />
               <CabeceraOrdenable columna="nombre" ordenActual={ordenPor} direccion={direccion} onClick={cambiarOrden}>
                 Proyecto
               </CabeceraOrdenable>
@@ -157,6 +190,14 @@ export function TablaProyectos({ proyectos }: { proyectos: ProyectoFila[] }) {
             {filas.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
                 <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={seleccionados.has(p.id)}
+                    onChange={() => alternarSeleccion(p.id)}
+                    aria-label={`Seleccionar ${p.nombre} para comparar`}
+                  />
+                </td>
+                <td className="px-3 py-2">
                   <Link href={`/proyectos/${p.id}`} className="font-medium text-slate-900 hover:underline">
                     {p.nombre}
                   </Link>
@@ -185,7 +226,7 @@ export function TablaProyectos({ proyectos }: { proyectos: ProyectoFila[] }) {
             ))}
             {filas.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
                   Ningún proyecto coincide con el filtro.
                 </td>
               </tr>
