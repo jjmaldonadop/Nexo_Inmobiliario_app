@@ -601,3 +601,41 @@ dado el mismo flujo mensual como input.
 Estas siete diferencias deben reflejarse en el diseño del motor de cálculo (paso 3 de la sección
 9 de la especificación) y en las pruebas de paridad (paso 4), usando como fuente de verdad
 siempre la hoja `FCF Base 26.01.27 `.
+
+## 10. Addendum — hallazgos al construir el motor de cálculo (paso 3)
+
+Al extraer el fixture de paridad completo (`I84:BO84` + `I15:BO15`) para escribir las pruebas de
+`indicadores.ts`, aparecieron dos anomalías adicionales en la hoja `FCF Base 26.01.27 ` que no
+eran visibles solo leyendo fórmulas ancla — solo se detectan recorriendo el rango completo:
+
+**8. El rango `I84:BO84` tiene 4 columnas vacías (`P`, `AC`, `AP`, `BC`)** — son columnas de
+"etiqueta de año" (`P16='Año 2025'`, `AC16='Año 2026'`, `AP16='Año 2027'`, `BC16='Año 2028'`)
+intercaladas entre los meses reales para separar visualmente los bloques anuales; no representan
+un mes de proyecto. De los 59 valores del rango, solo **55 son meses reales** con flujo neto. El
+motor debe ignorar estas columnas (no generarlas ni tratarlas como mes 0).
+
+**9. `XIRR(I84:BO84,I15:BO15,0)` usa un rango de fechas dañado.** `I15` es una fecha real
+(2024-06-01), pero `J15:BO15` son `=TEXT(EOMONTH(...),"mmm-yy")` — es decir, **texto** ("jul-24"),
+no números de fecha. Excel no puede evaluar `XIRR` con fechas de texto; el valor cacheado en
+`F87` (6.3559%) es casi con certeza un **remanente de una versión anterior** del archivo, de
+antes de que la fila 15 se convirtiera a texto para mostrarse como encabezado. Reconstruyendo la
+secuencia de fechas real que la fórmula `EOMONTH` pretendía producir (`2024-06-01`, luego fin de
+mes sucesivos) y corriendo XIRR sobre el mismo flujo neto, el resultado correcto es
+**≈6.2548%**, no 6.3559%. La diferencia (~0.11 puntos porcentuales) es la huella de esta fecha
+rota, no un error del motor nuevo. **`NPV(10%/12,I84:BO84)` no depende de fechas** (asume
+períodos regulares) y sí reproduce el valor cacheado de `F89` de forma exacta
+(-Q2,200,511.26) — por eso el VAN es una prueba de paridad estricta y el TIR es una prueba de
+paridad "aproximada, con fechas reconstruidas y la discrepancia documentada", no una igualdad
+exacta contra `F87`.
+
+**10. La fórmula del saldo de crédito (fila 73) tiene un bug de signo latente pero inofensivo.**
+En las columnas iniciales (antes del mes 22, cuando el desembolso real es 0), la fórmula es
+`=I73-J69-I75` (**resta** el desembolso del mes). A partir del mes en que el crédito empieza a
+moverse de verdad (`AG73` en adelante) la fórmula cambia a `=AF73+AG69-AF75` (**suma** el
+desembolso, que es la fórmula financieramente correcta: saldo```=```saldo anterior + desembolso
+del mes − pago de principal del mes anterior). Como todos los desembolsos son 0 en el tramo con
+el signo invertido, el bug nunca afectó ningún valor cacheado — pero si se copia la fórmula tal
+cual sin notar el cambio de signo, un motor que reciba desembolsos tempranos (>0) calcularía mal
+el saldo. El motor de cálculo implementa siempre la versión correcta
+(`saldo[t] = saldo[t-1] + desembolso[t] - pagoPrincipal[t-1]`), que es la que efectivamente
+gobierna todo el tramo con actividad real del crédito en el Excel.
