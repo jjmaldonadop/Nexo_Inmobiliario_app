@@ -5,3 +5,4 @@ export * from "./ventas";
 export * from "./financiamiento";
 export * from "./flujo-caja";
 export * from "./indicadores";
+export * from "./calcular-proyecto";

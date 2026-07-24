@@ -12,6 +12,19 @@ export function calcularCostoTotalProyecto(montos: number[]): number {
   return montos.reduce((acumulado, monto) => acumulado + monto, 0);
 }
 
+/**
+ * costoTotalTerrenoQ = costoUSDPorVara2 * (areaM2 * factorM2AVaras2) * tipoCambioQxUSD
+ * (`'Modelo de Desarrollo "Q"'!B35`, MOTOR_FINANCIERO.md §3).
+ */
+export function calcularCostoTotalTerreno(
+  costoUSDPorVara2: number,
+  areaM2: number,
+  factorM2AVaras2: number,
+  tipoCambioQxUSD: number
+): number {
+  return costoUSDPorVara2 * areaM2 * factorM2AVaras2 * tipoCambioQxUSD;
+}
+
 export interface CurvaDesembolsoLineal {
   montoTotal: number;
   mesInicio: number;
