@@ -34,9 +34,9 @@ interno.
 
 **Supabase:**
 1. Crear un proyecto nuevo.
-2. Settings → Database → Connection string:
-   - Copiar el modo **Transaction** (puerto `6543`, con `?pgbouncer=true`) → `DATABASE_URL`.
-   - Copiar el modo **Session** (puerto `5432`) → `DIRECT_URL`.
+2. Botón "Connect" (o Settings → Database → Connection string):
+   - Copiar el modo **Transaction pooler** (puerto `6543`) → `DATABASE_URL`.
+   - Copiar el modo **Session pooler** o **Direct connection** (puerto `5432`) → `DIRECT_URL`.
 
 **Neon:**
 1. Crear un proyecto nuevo.
@@ -46,8 +46,15 @@ interno.
 
 En ambos casos, agregar `sslmode=require` a la cadena si el proveedor no lo incluye ya.
 
+**Obligatorio en Supabase — agregar `?pgbouncer=true` a `DATABASE_URL`:** el connection string que
+copia el botón "Connect" de Supabase no lo incluye, pero Prisma lo necesita para hablar con el
+modo transacción de PgBouncer (Supavisor). Sin este parámetro, las consultas fallan de forma
+intermitente con el error de Postgres `42P05` ("prepared statement ... already exists") — pasó
+en producción justo por esto. Si la URL ya tiene otro parámetro (ej. `?sslmode=require`), usar
+`&pgbouncer=true` en vez de `?pgbouncer=true`. `DIRECT_URL` no lo necesita (no pasa por PgBouncer).
+
 - [ ] Base de datos creada
-- [ ] `DATABASE_URL` (pooled) copiada
+- [ ] `DATABASE_URL` (pooled, con `?pgbouncer=true`) copiada
 - [ ] `DIRECT_URL` (directa) copiada
 
 ---
