@@ -72,20 +72,31 @@ En ambos casos, agregar `sslmode=require` a la cadena si el proveedor no lo incl
 
 ## 3. Restringir el acceso (spec sección 3: "acceso restringido")
 
-Vercel → Project Settings → Deployment Protection:
+Vercel → Project Settings → Deployment Protection **solo protege producción en el plan Pro** (el
+plan Hobby/gratuito únicamente puede proteger *Preview* deployments). Para no depender de un plan
+pagado, este repo implementa su propio login de una sola contraseña compartida:
 
-- **Password Protection** (requiere plan Pro o superior): un solo password compartido con el
-  equipo de Nexo Inmobiliario.
-- **Vercel Authentication con lista de correos**: restringe a las cuentas de Google/GitHub/etc.
-  de dominios o correos específicos de Nexo Inmobiliario — más granular, también requiere plan
-  Pro o superior.
+- `src/middleware.ts` — intercepta toda ruta (excepto `/login`, `/api/login` y estáticos) y
+  exige una cookie de sesión válida; si no existe, redirige a `/login` (páginas) o responde 401
+  (rutas `/api/*`).
+- `src/app/login/page.tsx` + `src/app/api/login/route.ts` — formulario que compara la contraseña
+  ingresada contra `APP_PASSWORD` y, si coincide, entrega una cookie firmada con HMAC-SHA256
+  (`SESSION_SECRET`), `httpOnly`, válida 30 días.
+- `src/app/api/logout/route.ts` + `src/components/logout-button.tsx` — botón fijo en la esquina
+  superior derecha para cerrar sesión.
 
-En el plan Hobby (gratuito) solo se puede proteger *Preview* deployments, no producción — si el
-plan actual es Hobby, hay que decidir si se sube a Pro antes de exponer datos financieros reales,
-o si se restringe el acceso a nivel de aplicación (ej. un login propio) en una iteración futura.
+Variables de entorno nuevas a configurar en Vercel (Production **y** Preview):
 
-- [ ] Método de protección elegido y confirmado con Nexo Inmobiliario
-- [ ] Protección activada en el proyecto de Vercel
+- `APP_PASSWORD` — la contraseña que va a escribir el equipo (cualquier valor, elegido por
+  Nexo Inmobiliario).
+- `SESSION_SECRET` — valor aleatorio largo, generado una sola vez con
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`, igual en
+  todos los ambientes. No es una contraseña que nadie escribe a mano.
+
+- [ ] `APP_PASSWORD` configurada en Vercel
+- [ ] `SESSION_SECRET` configurada en Vercel
+- [ ] Redeploy hecho después de agregar las variables
+- [ ] Verificado que la URL de producción pide contraseña antes de mostrar cualquier página
 
 ---
 
